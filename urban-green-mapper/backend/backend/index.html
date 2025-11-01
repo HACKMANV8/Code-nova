@@ -1,0 +1,1471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Urban Green Mapper - Dark Mode</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet">
+
+    <!-- 
+        NOTE: The tailwind.config object MUST be in a <script> tag, 
+        NOT a <style> tag, to be valid JavaScript.
+    -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'primary-dark': '#181818',      /* Deep background */
+                        'secondary-dark': '#242424',    /* Card background */
+                        'accent-green': '#4CAF50',     /* Vibrant green accent */
+                        'accent-green': '#4CAF50',      /* Gain color */
+                        'accent-red': '#F44336',        /* Loss color */
+                        'text-light': '#E0E0E0',        /* Primary text color */
+                        'text-muted': '#A0A0A0',        /* Secondary text color */
+                        
+                        /* Land Ownership Colors */
+                        'land-public': '#3498db',     /* Blue */
+                        'land-private': '#9b59b6',    /* Purple */
+                        'land-govt': '#f1c40f',       /* Yellow */
+                        'land-unknown': '#95a5a6',    /* Gray */
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'], 
+                        classic: ['Inter', 'sans-serif'], 
+                    },
+                    keyframes: {
+                        'slide-up': {
+                            '0%': { opacity: '0', transform: 'translateY(20px)' },
+                            '100%': { opacity: '1', transform: 'translateY(0)' },
+                        },
+                        'pan-left': {
+                            '0%': { 'background-position': '0% 0%' },
+                            '100%': { 'background-position': '100% 0%' },
+                        },
+                        'metric-pulse': {
+                            '0%, 100%': { 'transform': 'scale(1)', 'box-shadow': '0 0 0 0 rgba(255, 110, 31, 0.2)' },
+                            '50%': { 'transform': 'scale(1.01)', 'box-shadow': '0 0 10px rgba(255, 110, 31, 0.8)' },
+                        }
+                    },
+                    animation: {
+                        'fade-in': 'slide-up 0.6s ease-out forwards',
+                        'map-pan': 'pan-left 60s linear infinite alternate',
+                        'metric-pulse': 'metric-pulse 4s ease-in-out infinite',
+                    },
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* ====================================================
+        GENERAL/FIXED STYLES & DARK MODE OVERRIDES
+        ==================================================== 
+        */
+        
+        /* Apply primary dark background to the body */
+        body {
+            background-color: #181818; /* --primary-dark */
+            color: #E0E0E0; /* --text-light */
+            font-family: 'Inter', sans-serif;
+            position: relative; /* For z-index stacking */
+            z-index: 1;
+        }
+
+        /* --- NEW: Dim leaf background image --- */
+        body::before {
+  content: "";
+  position: fixed; /* Cover the entire viewport */
+  inset: 0;
+
+  /* Make sure 'image.jpg' is in the same folder as this index.html file */
+  background-image: url('./image.jpg');
+  background-size: cover;       /* Fill the entire background */
+  background-position: center;  /* Center the image */
+  background-repeat: no-repeat; /* No tiling */
+  background-attachment: fixed; /* Parallax-like effect */
+
+  opacity: 0.25; /* Visible but not overpowering */
+  z-index: -1;   /* Stay behind all content */
+}
+
+
+        /* Nav active link color */
+        .nav-link.active { 
+            border-bottom: 2px solid #4CAF50; /* --accent-green */
+            color: #4CAF50; /* --accent-green */
+            font-weight: 600;
+        }
+
+        /* Map and chart fixes */
+        #map { height: 600px; width: 100%; }
+        .page { display: none; }
+        .page.active { display: block; }
+        .chart-container {
+            height: 300px;
+            position: relative;
+        }
+        #community-chart, #coverage-chart {
+            max-height: 300px;
+        }
+
+        /* Animation class control */
+        .animate-fade-in {
+            opacity: 0;
+            transform: translateY(20px);
+            transition: opacity 0.7s cubic-bezier(0.25, 0.46, 0.45, 0.94), transform 0.7s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+        }
+        .animate-fade-in.is-visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        .transition-liquid {
+            transition: all 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+        }
+        
+        /* Override form input focus colors for dark theme */
+        .form-input {
+            background-color: #242424; /* --secondary-dark */
+            border: 2px solid #4B5563; /* border-gray-600 */
+            color: #E0E0E0; /* --text-light */
+            width: 100%;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .form-input:focus {
+            border-color: #4CAF50 !important; /* --accent-green */
+            box-shadow: 0 0 0 1px #4CAF50 !important; /* --accent-green */
+        }
+        .form-input[readonly] {
+            background-color: #374151; /* gray-700 */
+            cursor: not-allowed;
+        }
+        
+        /* FIX for browser autofill background color */
+        .form-input:-webkit-autofill,
+        .form-input:-webkit-autofill:hover, 
+        .form-input:-webkit-autofill:focus, 
+        .form-input:-webkit-autofill:active  {
+            -webkit-box-shadow: 0 0 0 30px #242424 inset !important; /* --secondary-dark */
+            -webkit-text-fill-color: #E0E0E0 !important; /* --text-light */
+            caret-color: #E0E0E0 !important;
+            border: 2px solid #4B5563; /* border-gray-600 */
+        }
+        .form-input:-webkit-autofill:focus {
+            border-color: #4CAF50 !important; /* --accent-green */
+        }
+
+        /* Leaflet Map Dark Mode Tile */
+        .leaflet-tile-pane {
+             filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
+        }
+        
+        /* Map Legend Icon Fix */
+        .legend-circle {
+            min-width: 1rem;
+            min-height: 1rem;
+            height: 1rem;
+            width: 1rem;
+            border-radius: 9999px;
+            margin-right: 0.5rem;
+            box-shadow: 0 0 5px rgba(0,0,0,0.5);
+        }
+        .legend-outline {
+            min-width: 1rem;
+            min-height: 1rem;
+            height: 1rem;
+            width: 1rem;
+            border-radius: 9999px;
+            margin-right: 0.5rem;
+            border-width: 3px;
+            background-color: #404040; /* Dark inner color for legend */
+        }
+
+        /* Spinner for buttons */
+        .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+    </style>
+</head>
+<body class="bg-primary-dark text-text-light font-sans">
+    
+    <!-- Navigation Bar -->
+    <nav class="bg-secondary-dark text-text-light shadow-xl border-b border-gray-700 sticky top-0 z-40">
+        <div class="container mx-auto px-4 py-3 flex justify-between items-center">
+            
+            <a href="#" onclick="navigate('home'); return false;" class="text-3xl font-classic font-light tracking-wider text-accent-green flex items-center">
+                <!-- Pixel Art Leaf Logo -->
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 17" width="28" height="34" style="image-rendering: pixelated; margin-right: 10px; flex-shrink: 0;">
+                    <style>
+                        .l { fill: #8BC34A; } /* Light Green */
+                        .d { fill: #4CAF50; } /* Dark Green (theme accent-green) */
+                    </style>
+                    <path class="l" d="M9,0 h1v1h1v1h1v1h1v2h-1v1h-1v1h-1v1h-1v1h-1v1h-1v-1h-1v-1h-1v-1h-1v-1h-1v-1h1v-1h1v-1h1v-1h1v-1h1v-1h1z M7,12 h1v1h1v1h-1v1h-1v-1h-1v-1h1z M7,15 h1v2h-1z"/>
+                    <path class="d" d="M5,6 h2v2h-2z" />
+                    <path class="d" d="M9,9 h2v2h-2z" />
+                </svg>
+                <span>Urban Green Mapper</span>
+            </a>
+
+            <div id="nav-links" class="flex space-x-6 items-center">
+                <a href="#" onclick="navigate('home'); return false;" class="nav-link hover:text-accent-green transition" data-page="home">Home</a>
+                <a href="#" onclick="navigate('map'); return false;" class="nav-link hover:text-accent-green transition" data-page="map">Map</a>
+                <a href="#" onclick="navigate('opportunities'); return false;" class="nav-link hover:text-accent-green transition" data-page="opportunities" id="opportunities-link" style="display:none">Opportunities</a>
+                <a href="#" onclick="navigate('projects'); return false;" class="nav-link hover:text-accent-green transition" data-page="projects" id="projects-link" style="display:none">Projects</a>
+                <a href="#" onclick="navigate('community'); return false;" class="nav-link hover:text-accent-green transition" data-page="community" id="community-link" style="display:none">Community</a>
+                <a href="#" onclick="navigate('dashboard'); return false;" class="nav-link hover:text-accent-green transition" data-page="dashboard" id="dashboard-link" style="display:none">Dashboard</a>
+                
+                <!-- Auth Links -->
+                <a href="#" onclick="navigate('login'); return false;" class="nav-link hover:text-accent-green transition" data-page="login" id="login-link">Login</a>
+                <a href="#" onclick="navigate('register'); return false;" class="nav-link hover:text-accent-green transition" data-page="register" id="register-link">Register</a>
+                <a href="#" onclick="logout(); return false;" class="nav-link hover:text-accent-green transition" id="logout-link" style="display:none">Logout</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Modal Overlay (Used for custom alerts) -->
+    <div id="custom-modal" class="fixed inset-0 bg-black bg-opacity-70 hidden items-center justify-center z-50 p-4 animate-fade-in" style="animation-duration: 0.2s;">
+        <div class="bg-secondary-dark p-6 rounded-xl shadow-2xl max-w-sm w-full border border-gray-700">
+            <h3 id="modal-title" class="text-2xl font-classic text-accent-green mb-4">Notification</h3>
+            <p id="modal-message" class="text-text-light mb-6">This is a modal message.</p>
+            <button onclick="closeModal()" class="w-full bg-accent-green text-white py-2 rounded-lg font-semibold hover:bg-opacity-80 transition">
+                OK
+            </button>
+        </div>
+    </div>
+
+
+    <!-- ====================================================
+    PAGE: HOME
+    ==================================================== -->
+    <div id="home-page" class="page active">
+        <!-- REMOVED: bg-primary-dark to allow body background image to show -->
+        <div class="min-h-screen">
+            <div class="container mx-auto px-4 py-20">
+                
+                <div class="text-center mb-16 animate-fade-in is-visible">
+                    <h1 class="text-6xl md:text-7xl font-classic font-light tracking-wide text-text-light mb-6 leading-tight">
+                        Mapping a <br>
+                        Modern Urban Ecosystem.
+                    </h1>
+                    <p class="text-xl text-text-muted max-w-3xl mx-auto">
+                        Empowering communities with *AI and GIS mapping* to collaboratively track, analyze, and expand vital green spaces in their cities.
+                    </p>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-10 mt-16" data-animate-on-scroll>
+                    <div class="bg-secondary-dark p-8 rounded-xl shadow-lg border border-gray-700 transition duration-300 hover:shadow-xl hover:border-accent-green animate-fade-in" style="transition-delay: 0.1s;">
+                        <div class="text-4xl mb-4 text-accent-green">🗺</div>
+                        <h3 class="text-xl font-semibold mb-2 text-text-light">Interactive Mapping (GIS)</h3>
+                        <p class="text-text-muted">Visualize green zones with real-time coverage levels and add new tree locations.</p>
+                    </div>
+                    <div class="bg-secondary-dark p-8 rounded-xl shadow-lg border border-gray-700 transition duration-300 hover:shadow-xl hover:border-accent-green animate-fade-in" style="transition-delay: 0.2s;">
+                        <div class="text-4xl mb-4 text-accent-green">🤖</div>
+                        <h3 class="text-xl font-semibold mb-2 text-text-light">AI Detection & Analysis</h3>
+                        <p class="text-text-muted">Upload images for automatic tree detection and zone identification, feeding real-time data.</p>
+                    </div>
+                    <div class="bg-secondary-dark p-8 rounded-xl shadow-lg border border-gray-700 transition duration-300 hover:shadow-xl hover:border-accent-green animate-fade-in" style="transition-delay: 0.3s;">
+                        <div class="text-4xl mb-4 text-accent-green">👥</div>
+                        <h3 class="text-xl font-semibold mb-2 text-text-light">Community Driven Restoration</h3>
+                        <p class="text-text-muted">Join local groups, track progress, and collaborate on urban greening projects with leaderboards.</p>
+                    </div>
+                </div>
+
+                <div class="text-center mt-16 animate-fade-in" style="transition-delay: 0.4s;">
+                    <button onclick="navigate('map')" 
+                            class="bg-accent-green text-white px-10 py-4 rounded-full text-xl font-semibold shadow-xl 
+                                   hover:bg-opacity-80 hover:scale-[1.05] 
+                                   transition-liquid">
+                        Explore Live Map
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====================================================
+    PAGE: LOGIN
+    ==================================================== -->
+    <div id="login-page" class="page">
+        <!-- This bg-primary-dark will cover the body background image -->
+        <div class="min-h-screen bg-primary-dark flex items-center justify-center px-4">
+            <div class="bg-secondary-dark p-10 rounded-xl shadow-2xl max-w-md w-full border border-gray-700 animate-fade-in">
+                <h2 class="text-3xl font-classic text-center mb-6 text-text-light">Welcome Back</h2>
+                
+                <!-- Login Error/Redirect Message Area -->
+                <div id="login-error" class="bg-accent-red/20 border border-accent-red text-text-light px-4 py-3 rounded mb-4" style="display:none"></div>
+                
+                <form onsubmit="handleLogin(event); return false;" class="space-y-4">
+                    <div>
+                        <label class="block text-text-light font-medium mb-2">Email</label>
+                        <input type="email" id="login-email" class="form-input" required />
+                    </div>
+                    <div>
+                        <label class="block text-text-light font-medium mb-2">Password</label>
+                        <input type="password" id="login-password" class="form-input" required />
+                    </div>
+                    <button type="submit" class="w-full bg-accent-green text-white py-3 rounded-lg font-semibold hover:bg-opacity-80 transition">Log In</button>
+                </form>
+                <p class="text-center mt-4 text-text-muted">
+                    Don't have an account? <a href="#" onclick="navigate('register'); return false;" class="text-accent-green hover:underline">Register Here</a>
+                </p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- ====================================================
+    PAGE: REGISTER
+    ==================================================== -->
+    <div id="register-page" class="page">
+        <!-- This bg-primary-dark will cover the body background image -->
+        <div class="min-h-screen bg-primary-dark flex items-center justify-center px-4">
+            <div class="bg-secondary-dark p-10 rounded-xl shadow-2xl max-w-md w-full border border-gray-700 animate-fade-in">
+                <h2 class="text-3xl font-classic text-center mb-6 text-text-light">Join the Movement</h2>
+                <div id="register-error" class="bg-accent-red/20 border border-accent-red text-text-light px-4 py-3 rounded mb-4" style="display:none"></div>
+                <form onsubmit="handleRegister(event); return false;" class="space-y-4">
+                    <div>
+                        <label class="block text-text-light font-medium mb-2">Name</label>
+                        <input type="text" id="register-name" class="form-input" required />
+                    </div>
+                    <div>
+                        <label class="block text-text-light font-medium mb-2">Email</label>
+                        <input type="email" id="register-email" class="form-input" required />
+                    </div>
+                    <div>
+                        <label class="block text-text-light font-medium mb-2">Password</label>
+                        <input type="password" id="register-password" class="form-input" required />
+                    </div>
+                    <button type="submit" class="w-full bg-accent-green text-white py-3 rounded-lg font-semibold hover:bg-opacity-80 transition">Register</button>
+                </form>
+                <p class="text-center mt-4 text-text-muted">
+                    Already have an account? <a href="#" onclick="navigate('login'); return false;" class="text-accent-green hover:underline">Login</a>
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====================================================
+    PAGE: MAP
+    ==================================================== -->
+    <div id="map-page" class="page">
+        <div class="container mx-auto px-4 py-8">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <!-- Left Column: Map -->
+                <div class="md:col-span-2 space-y-6">
+                    <h1 class="text-3xl font-classic text-text-light animate-fade-in">Interactive Green Map</h1>
+                    
+                    <!-- Search Bar (NEW) -->
+                    <div class="flex space-x-2 animate-fade-in" style="transition-delay: 0.1s;">
+                        <input type="text" id="map-search" class="form-input" placeholder="Search for a location... (e.g., 'City of London')">
+                        <button onclick="handleSearchLocation()" class="bg-accent-green text-white px-5 py-2 rounded-lg font-semibold hover:bg-opacity-80 transition">Search</button>
+                    </div>
+
+                    <div id="map" class="rounded-xl shadow-2xl border-4 border-gray-700 animate-fade-in" style="transition-delay: 0.2s;"></div>
+                    
+                    <!-- Map Legend -->
+                    <div class="bg-secondary-dark p-4 rounded-xl shadow-lg border border-gray-700 animate-fade-in" style="transition-delay: 0.3s;">
+                        <div class="flex flex-col md:flex-row md:items-center md:space-x-6 text-base font-medium text-text-light">
+                            <!-- Coverage Legend -->
+                            <div class="flex items-center space-x-4">
+                                <span class="text-accent-green font-semibold">Coverage (Fill):</span>
+                                <div class="flex items-center">
+                                    <span class="legend-circle bg-accent-green"></span>
+                                    <span>High</span>
+                                </div>
+                                <div class="flex items-center">
+                                    <span class="legend-circle bg-yellow-500"></span>
+                                    <span>Medium</span>
+                                </div>
+                                <div class="flex items-center">
+                                    <span class="legend-circle bg-accent-red"></span>
+                                    <span>Low</span>
+                                </div>
+                            </div>
+                            
+                            <!-- Ownership Legend -->
+                            <div class="flex items-center space-x-4 mt-2 md:mt-0 md:ml-6">
+                                <span class="text-accent-green font-semibold">Ownership (Outline):</span>
+                                <div class="flex items-center">
+                                    <span class="legend-outline border-land-public"></span>
+                                    <span>Public</span>
+                                </div>
+                                <div class="flex items-center">
+                                    <span class="legend-outline border-land-private"></span>
+                                    <span>Private</span>
+                                </div>
+                                <div class="flex items-center">
+                                    <span class="legend-outline border-land-govt"></span>
+                                    <span>Govt.</span>
+                                </div>
+                                <div class="flex items-center">
+                                    <span class="legend-outline border-land-unknown"></span>
+                                    <span>Pending</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Column: Report Form (UPDATED) -->
+                <div class="md:col-span-1 space-y-6">
+                    <div class="bg-secondary-dark p-6 rounded-xl shadow-lg border border-gray-700 animate-fade-in" style="transition-delay: 0.1s;">
+                        <h2 class="text-2xl font-classic text-accent-green mb-4">Report a Change</h2>
+                        <p class="text-text-muted text-sm mb-4">Click on the map to select a location, then fill out this form to report a change.</p>
+                        
+                        <form id="report-form" onsubmit="handleReportSubmit(event); return false;" class="space-y-4">
+                            <div>
+                                <label class="block text-text-light font-medium mb-2">Location Name</label>
+                                <input type="text" id="report-location-name" class="form-input" placeholder="e.g., 'Lot behind school'" required />
+                            </div>
+                            <div>
+                                <label class="block text-text-light font-medium mb-2">Coordinates</label>
+                                <input type="text" id="report-coordinates" class="form-input" readonly placeholder="Click map to select..." required />
+                            </div>
+                            <div>
+                                <label class="block text-text-light font-medium mb-2">Report Type</label>
+                                <select id="report-type" class="form-input">
+                                    <option value="afforestation">Afforestation (New Planting)</option>
+                                    <option value="deforestation">Deforestation (Trees Removed)</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-text-light font-medium mb-2">Verification Image</label>
+                                <input type="file" id="report-image" accept="image/*" class="text-base text-text-light p-2 border border-gray-600 rounded-lg cursor-pointer hover:border-accent-green transition bg-primary-dark w-full" required />
+                            </div>
+                            
+                            <!-- Submit Button (UPDATED) -->
+                            <button type="submit" id="report-submit-button" class="w-full bg-accent-green text-white py-3 rounded-lg font-semibold hover:bg-opacity-80 transition flex items-center justify-center">
+                                <span id="report-submit-text">Submit Report for Validation</span>
+                                <div id="report-submit-spinner" class="spinner" style="display: none;"></div>
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- ====================================================
+    PAGE: DASHBOARD
+    ==================================================== -->
+    <div id="dashboard-page" class="page">
+        <div class="container mx-auto px-4 py-8">
+            <h1 class="text-4xl font-classic text-text-light mb-8 animate-fade-in">Community Dashboard</h1>
+            <div class="grid grid-cols-1 lg:grid-cols-4 gap-8" data-animate-on-scroll>
+                <div class="lg:col-span-3 space-y-8">
+                    <!-- Stat Cards -->
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div class="bg-secondary-dark p-6 rounded-xl shadow-lg border-l-4 border-accent-green transition hover:shadow-xl animate-fade-in" style="transition-delay: 0.1s;">
+                            <h3 class="text-text-muted text-sm font-medium">Total Mapped Trees</h3>
+                            <p class="text-4xl font-bold text-accent-green mt-2" id="total-trees">0</p>
+                        </div>
+                        <div class="bg-secondary-dark p-6 rounded-xl shadow-lg border-l-4 border-accent-green transition hover:shadow-xl animate-fade-in" style="transition-delay: 0.2s;">
+                            <h3 class="text-text-muted text-sm font-medium">Estimated CO₂ Offset</h3>
+                            <p class="text-4xl font-bold text-accent-green mt-2" id="co2-offset">0 kg</p>
+                        </div>
+                        <div class="bg-secondary-dark p-6 rounded-xl shadow-lg border-l-4 border-blue-500 transition hover:shadow-xl animate-fade-in" style="transition-delay: 0.3s;">
+                            <h3 class="text-text-muted text-sm font-medium">Verified Green Zones</h3>
+                            <p class="text-4xl font-bold text-blue-500 mt-2" id="verified-zones">0</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Charts -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="bg-secondary-dark p-6 rounded-xl shadow-2xl border border-gray-700 animate-fade-in" style="transition-delay: 0.4s;">
+                            <h3 class="text-xl font-classic text-text-light mb-4">Top Communities (Tree Contributions)</h3>
+                            <div class="chart-container">
+                                <canvas id="community-chart"></canvas>
+                            </div>
+                        </div>
+                        <div class="bg-secondary-dark p-6 rounded-xl shadow-2xl border border-gray-700 animate-fade-in" style="transition-delay: 0.5s;">
+                            <h3 class="text-xl font-classic text-text-light mb-4">Zone Verification Status</h3>
+                            <div class="chart-container">
+                                <canvas id="coverage-chart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Sidebar -->
+                <div class="lg:col-span-1">
+                    <div class="bg-secondary-dark shadow-2xl rounded-xl p-6 space-y-8 border border-gray-700 animate-fade-in" style="transition-delay: 0.6s;">
+                        <div>
+                            <h3 class="text-xl font-classic text-text-light mb-3">👤 User Status</h3>
+                            <div id="user-info" class="space-y-1 text-text-muted">
+                                <p>Not logged in</p>
+                            </div>
+                        </div>
+                        <div>
+                            <h3 class="text-xl font-classic text-text-light mb-3">🏘 Active Community</h3>
+                            <div id="community-info" class="space-y-1 text-text-muted">
+                                <p>No community joined</p>
+                            </div>
+                        </div>
+                        <div>
+                            <h3 class="text-xl font-classic text-text-light mb-3">🌳 Eco-Suggestions</h3>
+                            <ul class="space-y-2 text-base text-text-light list-disc list-inside">
+                                <li>Plant *native* species for local resilience.</li>
+                                <li>Monitor trees planted in the last 6 months.</li>
+                                <li>Engage three neighbors to join a local zone.</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- ====================================================
+    PAGE: PROJECTS
+    ==================================================== -->
+    <div id="projects-page" class="page">
+        <div class="container mx-auto px-4 py-8">
+            <h1 class="text-4xl font-classic text-text-light mb-8 animate-fade-in">Active Greening Projects</h1>
+            
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8" data-animate-on-scroll>
+                
+                <!-- Project Card 1 -->
+                <div class="bg-secondary-dark p-8 rounded-xl shadow-lg border border-gray-700 transition duration-300 hover:shadow-xl hover:border-accent-green animate-fade-in" style="transition-delay: 0.1s;">
+                    <h3 class="text-2xl font-semibold mb-2 text-text-light">Parkside Reforestation</h3>
+                    <p class="text-text-muted text-sm mb-4">Community: Green Warriors</p>
+                    <p class="text-text-light mb-4">Targeting the regeneration of the central park's western edge.</p>
+                    
+                    <p class="text-text-muted text-sm mb-1">Progress: 75% complete (120/160 trees planted)</p>
+                    <div class="w-full bg-primary-dark rounded-full h-2.5 border border-gray-700">
+                        <div class="bg-blue-600 h-2.5 rounded-full" style="width: 75%"></div>
+                    </div>
+                </div>
+
+                <!-- Project Card 2 -->
+                <div class="bg-secondary-dark p-8 rounded-xl shadow-lg border border-gray-700 transition duration-300 hover:shadow-xl hover:border-accent-green animate-fade-in" style="transition-delay: 0.2s;">
+                    <h3 class="text-2xl font-semibold mb-2 text-text-light">Highway Median Beautification</h3>
+                    <p class="text-text-muted text-sm mb-4">Community: Eco Champions</p>
+                    <p class="text-text-light mb-4">Focus on planting low-maintenance shrubs along major city arteries.</p>
+                    
+                    <p class="text-text-muted text-sm mb-1">Progress: 40% complete (200/500 shrubs planted)</p>
+                    <div class="w-full bg-primary-dark rounded-full h-2.5 border border-gray-700">
+                        <div class="bg-blue-600 h-2.5 rounded-full" style="width: 40%"></div>
+                    </div>
+                </div>
+
+                <!-- Project Card 3 -->
+                <div class="bg-secondary-dark p-8 rounded-xl shadow-lg border border-gray-700 transition duration-300 hover:shadow-xl hover:border-accent-green animate-fade-in" style="transition-delay: 0.3s;">
+                    <h3 class="text-2xl font-semibold mb-2 text-text-light">School Green Roof Pilot</h3>
+                    <p class="text-text-muted text-sm mb-4">Community: Tree Planters</p>
+                    <p class="text-text-light mb-4">Experimental phase for installing green roofs on public school buildings.</p>
+                    
+                    <p class="text-text-muted text-sm mb-1">Progress: 15% complete (Research phase)</p>
+                    <div class="w-full bg-primary-dark rounded-full h-2.5 border border-gray-700">
+                        <div class="bg-blue-600 h-2.5 rounded-full" style="width: 15%"></div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- ====================================================
+    PAGE: COMMUNITY
+    ==================================================== -->
+    <div id="community-page" class="page">
+        <div class="container mx-auto px-4 py-8">
+            <div class="flex justify-between items-center mb-8 animate-fade-in">
+                <h1 class="text-3xl font-classic text-text-light">Community & Collaboration</h1>
+                <div class="flex space-x-4">
+                     <button onclick="toggleJoinCommunity()" 
+                            class="bg-blue-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-blue-700 transition">
+                        Join Community
+                    </button>
+                    <button onclick="toggleCreateCommunity()" 
+                            class="bg-accent-green text-white px-6 py-2 rounded-lg font-semibold hover:bg-opacity-80 transition">
+                        + Create Community
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Join Community Form (New) -->
+            <div id="join-community-form" class="bg-secondary-dark p-8 rounded-xl shadow-lg mb-8 border border-gray-700 animate-fade-in" style="display:none; transition-delay: 0.1s;">
+                <h2 class="text-2xl font-classic text-text-light mb-4">Join an Existing Community</h2>
+                <form onsubmit="handleJoinCommunity(event); return false;" class="space-y-4">
+                    <div>
+                        <label class="block text-text-light font-medium mb-2">Community Code</label>
+                        <input type="text" id="community-code" class="form-input" placeholder="e.g., GREEN-WARRIORS-123" required />
+                    </div>
+                    <button type="submit" class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition">Join Initiative</button>
+                </form>
+            </div>
+            
+            <!-- Create Community Form -->
+            <div id="create-community-form" class="bg-secondary-dark p-8 rounded-xl shadow-lg mb-8 border border-gray-700 animate-fade-in" style="display:none; transition-delay: 0.1s;">
+                <h2 class="text-2xl font-classic text-text-light mb-4">Create New Green Initiative</h2>
+                <form onsubmit="handleCreateCommunity(event); return false;" class="space-y-4">
+                    <div>
+                        <label class="block text-text-light font-medium mb-2">Community Name</label>
+                        <input type="text" id="community-name" class="form-input" required />
+                    </div>
+                    <div>
+                        <label class="block text-text-light font-medium mb-2">Description</label>
+                        <textarea id="community-description" class="form-input" rows="3" required></textarea>
+                    </div>
+                    <button type="submit" class="bg-accent-green text-white px-6 py-2 rounded-lg hover:bg-opacity-80 transition">Create Initiative</button>
+                </form>
+            </div>
+            
+            <!-- Community Details -->
+            <div id="community-details" class="bg-secondary-dark p-12 rounded-xl shadow-2xl text-center border border-gray-700 animate-fade-in" style="transition-delay: 0.2s;">
+                <p class="text-text-muted text-xl">
+                    <span class="text-4xl block mb-4">🌱</span> 
+                    No active community. Create or join one to view member leaderboards and project progress!
+                </p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- ====================================================
+    PAGE: OPPORTUNITIES (NEW)
+    ==================================================== -->
+    <div id="opportunities-page" class="page">
+        <div class="container mx-auto px-4 py-8">
+            <div class="flex justify-between items-center mb-8 animate-fade-in">
+                <h1 class="text-3xl font-classic text-text-light">Planting Opportunities</h1>
+                <button onclick="togglePostOpportunityForm()" 
+                        class="bg-accent-green text-white px-6 py-2 rounded-lg font-semibold hover:bg-opacity-80 transition">
+                    + Post New Opportunity
+                </button>
+            </div>
+
+            <!-- Post Opportunity Form (Hidden by default) -->
+            <div id="post-opportunity-form" class="bg-secondary-dark p-8 rounded-xl shadow-lg mb-8 border border-gray-700 animate-fade-in" style="display:none; transition-delay: 0.1s;">
+                <h2 class="text-2xl font-classic text-text-light mb-4">Post a New Planting Task</h2>
+                <form onsubmit="handlePostOpportunity(event); return false;" class="space-y-4">
+                    <div>
+                        <label class="block text-text-light font-medium mb-2">Opportunity Title</label>
+                        <input type="text" id="opportunity-title" class="form-input" placeholder="e.g., Reforest City Hall Lawn" required />
+                    </div>
+                    <div>
+                        <label class="block text-text-light font-medium mb-2">Location / Description</label>
+                        <textarea id="opportunity-desc" class="form-input" rows="3" placeholder="Describe the area, size, and type of planting needed." required></textarea>
+                    </div>
+                    <div>
+                        <label class="block text-text-light font-medium mb-2">Land Type</label>
+                        <select id="opportunity-land-type" class="form-input">
+                            <option value="public">Public Land</option>
+                            <option value="government">Government Land</option>
+                            <option value="private">Private (Permission Granted)</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="bg-accent-green text-white px-6 py-2 rounded-lg hover:bg-opacity-80 transition">Post Task</button>
+                </form>
+            </div>
+
+            <!-- List of Opportunities -->
+            <div id="opportunities-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" data-animate-on-scroll>
+                <!-- Opportunity cards will be dynamically inserted here -->
+                <p class="text-text-muted">Loading opportunities...</p>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- ====================================================
+    JAVASCRIPT LOGIC
+    ==================================================== -->
+    <script>
+        // --- Mock Database ---
+        var map;
+        var currentUser = null;
+        var greenzones = [];
+        var communityChart = null;
+        var coverageChart = null;
+        var selectedLocationMarker = null; // NEW: Marker for temp selection
+        
+        // Mock DB for Opportunities
+        var plantingOpportunities = [
+            {
+                id: 1,
+                title: "Reforest City Hall Lawn",
+                location: "123 Main St, Civic Center",
+                landType: "government",
+                status: "Open", // Open, In Progress, Completed
+                postedBy: "City Parks Dept.",
+                claimedBy: null
+            },
+            {
+                id: 2,
+                title: "Highway 101 Median Planting",
+                location: "Along HWY 101, Exit 4-5",
+                landType: "public",
+                status: "In Progress",
+                postedBy: "Caltrans",
+                claimedBy: "Eco Champions"
+            },
+            {
+                id: 3,
+                title: "Community Garden Prep",
+                location: "Corner of 5th and Oak",
+                landType: "public",
+                status: "Completed",
+                postedBy: "NeighborGood",
+                claimedBy: "Green Warriors"
+            }
+        ];
+
+
+        // --- Core App Functions ---
+
+        window.onload = function() {
+            loadUser();
+            updateNavbar();
+            navigate('home');
+            initAnimations();
+        };
+
+        function navigate(page, redirectMessage = null) {
+            var pages = document.querySelectorAll('.page');
+            var links = document.querySelectorAll('.nav-link');
+            
+            pages.forEach(p => p.classList.remove('active'));
+            links.forEach(l => l.classList.remove('active'));
+            
+            var pageEl = document.getElementById(page + '-page');
+            var linkEl = document.querySelector('[data-page="' + page + '"]');
+            
+            if (pageEl) pageEl.classList.add('active');
+            if (linkEl) linkEl.classList.add('active');
+
+            // --- Protected Route Logic ---
+            if (['dashboard', 'community', 'projects', 'opportunities'].indexOf(page) !== -1 && !currentUser) {
+                var message = 'Access denied. Please log in to view the ' + page + ' page.';
+                navigate('login', message); 
+                return;
+            }
+
+            // --- Page-Specific Initializers ---
+            if (page === 'map') setTimeout(initMap, 100);
+            if (page === 'dashboard') setTimeout(loadDashboard, 100); 
+            if (page === 'community') loadCommunity();
+            if (page === 'opportunities') loadOpportunities(); 
+            
+            // Handle redirect messages
+            var loginErrorEl = document.getElementById('login-error');
+            if (page === 'login' && redirectMessage) {
+                loginErrorEl.textContent = redirectMessage;
+                loginErrorEl.style.display = 'block';
+                loginErrorEl.classList.remove('bg-accent-red/20', 'border-accent-red');
+                loginErrorEl.classList.add('bg-blue-600/20', 'border-blue-600');
+            } else if (page === 'login') {
+                loginErrorEl.style.display = 'none'; 
+            }
+            
+            // Re-trigger animations
+            document.querySelectorAll('.animate-fade-in').forEach(el => {
+                el.classList.remove('is-visible');
+            });
+            setTimeout(initAnimations, 150);
+        }
+
+        function initAnimations() {
+            const elements = document.querySelectorAll('.animate-fade-in');
+            const observer = new IntersectionObserver((entries, observer) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        entry.target.classList.add('is-visible');
+                        observer.unobserve(entry.target);
+                    }
+                });
+            }, { threshold: 0.1 });
+
+            elements.forEach(el => {
+                if (el.closest('.page.active')) {
+                    observer.observe(el);
+                }
+            });
+        }
+        
+        // --- Modal Functions ---
+        
+        function openModal(title, message) {
+            document.getElementById('modal-title').textContent = title;
+            document.getElementById('modal-message').textContent = message;
+            document.getElementById('custom-modal').classList.remove('hidden');
+            document.getElementById('custom-modal').classList.add('flex');
+        }
+
+        function closeModal() {
+            document.getElementById('custom-modal').classList.add('hidden');
+            document.getElementById('custom-modal').classList.remove('flex');
+        }
+
+
+        // --- Auth Functions ---
+
+        function loadUser() {
+            try {
+                var userStr = localStorage.getItem('user');
+                var token = localStorage.getItem('token');
+                if (userStr && token) {
+                    currentUser = JSON.parse(userStr);
+                }
+            } catch(e) {
+                console.log('Error loading user:', e);
+                logout(); 
+            }
+        }
+
+        function updateNavbar() {
+            if (currentUser) {
+                document.getElementById('login-link').style.display = 'none';
+                document.getElementById('register-link').style.display = 'none';
+                document.getElementById('dashboard-link').style.display = 'block';
+                document.getElementById('projects-link').style.display = 'block';
+                document.getElementById('community-link').style.display = 'block';
+                document.getElementById('opportunities-link').style.display = 'block'; 
+                document.getElementById('logout-link').style.display = 'block';
+                document.getElementById('logout-link').textContent = 'Logout (' + currentUser.name + ')';
+            } else {
+                document.getElementById('login-link').style.display = 'block';
+                document.getElementById('register-link').style.display = 'block';
+                document.getElementById('dashboard-link').style.display = 'none';
+                document.getElementById('projects-link').style.display = 'none';
+                document.getElementById('community-link').style.display = 'none';
+                document.getElementById('opportunities-link').style.display = 'none'; 
+                document.getElementById('logout-link').style.display = 'none';
+            }
+        }
+
+        function handleLogin(e) { 
+            e.preventDefault();
+            var email = document.getElementById('login-email').value;
+            var password = document.getElementById('login-password').value;
+            var errorEl = document.getElementById('login-error');
+            errorEl.style.display = 'none';
+            errorEl.classList.remove('bg-blue-600/20', 'border-blue-600');
+            errorEl.classList.add('bg-accent-red/20', 'border-accent-red');
+
+            if (!email || !password) {
+                errorEl.textContent = 'Please enter both email and password.';
+                errorEl.style.display = 'block';
+                return;
+            }
+            
+            var mockUser = { 
+                name: (email.split('@')[0] || 'Demo User').replace(/^\w/, c => c.toUpperCase()), 
+                email: email, 
+                id: 101, 
+                community: null 
+            };
+            var mockToken = 'mock-jwt-token-for-user-101';
+            
+            localStorage.setItem('token', mockToken);
+            localStorage.setItem('user', JSON.stringify(mockUser));
+            currentUser = mockUser;
+            
+            updateNavbar();
+            navigate('dashboard');
+        }
+        
+        function handleRegister(e) { 
+            e.preventDefault();
+            var name = document.getElementById('register-name').value;
+            var email = document.getElementById('register-email').value;
+            var password = document.getElementById('register-password').value;
+            var errorEl = document.getElementById('register-error');
+            errorEl.style.display = 'none';
+
+            if (!name || !email || !password) {
+                errorEl.textContent = 'Please fill in all fields.';
+                errorEl.style.display = 'block';
+                return;
+            }
+            
+            navigate('login', 'Registration successful! Please log in.');
+        }
+        
+        function logout() { 
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            currentUser = null;
+            updateNavbar();
+            navigate('home');
+        }
+        
+        // --- Map Functions (UPDATED) ---
+
+        function initMap() { 
+            if (map) {
+                map.invalidateSize();
+                return;
+            }
+            
+            map = L.map('map').setView([51.505, -0.09], 13);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(map);
+
+            loadGreenzones();
+            map.on('click', handleMapClick);
+        }
+
+        // NEW: Mock search function
+        function handleSearchLocation() {
+            var query = document.getElementById('map-search').value;
+            if (!query) return;
+            // MOCK: In a real app, this would call a geocoding API.
+            // For now, we just pan to a mock location (e.g., City of London).
+            var mockCoords = [51.515, -0.09];
+            map.setView(mockCoords, 15);
+            
+            if (selectedLocationMarker) {
+                map.removeLayer(selectedLocationMarker);
+            }
+            selectedLocationMarker = L.marker(mockCoords).addTo(map)
+                .bindPopup("Searched Location").openPopup();
+            
+            // Pre-fill form
+            document.getElementById('report-coordinates').value = `${mockCoords[0].toFixed(5)}, ${mockCoords[1].toFixed(5)}`;
+            document.getElementById('report-location-name').value = query;
+        }
+        
+        function loadGreenzones() { 
+            // Clear existing markers except the temp one
+            map.eachLayer(function (layer) {
+                if ((layer instanceof L.CircleMarker || layer instanceof L.Marker) && layer !== selectedLocationMarker) {
+                    map.removeLayer(layer);
+                }
+            });
+
+            // Mock data for zones, NOW with status
+            greenzones = [
+                { lat: 51.5, lng: -0.09, coverage: 85, trees: 120, name: "Hyde Park Zone", ownerType: "public", status: "verified" }, 
+                { lat: 51.51, lng: -0.1, coverage: 40, trees: 45, name: "Covent Garden Spot", ownerType: "private", status: "verified" }, 
+                { lat: 51.52, lng: -0.08, coverage: 15, trees: 10, name: "Finsbury Square", ownerType: "government", status: "verified" },
+                { lat: 51.49, lng: -0.11, coverage: 95, trees: 200, name: "Regent's Park Hub", ownerType: "public", status: "verified" },
+                { lat: 51.50, lng: -0.12, coverage: 50, trees: 30, name: "Trafalgar Square", ownerType: "unknown", status: "pending", reportedBy: "Admin", type: "afforestation" } 
+            ];
+
+            greenzones.forEach(function(zone) {
+                addZoneMarker(zone);
+            });
+        }
+        
+        // NEW: Refactored marker adding
+        function addZoneMarker(zone) {
+            var coverageColor = getCoverageColor(zone.coverage);
+            var ownerColor, popupText, radius;
+
+            if (zone.status === 'pending') {
+                ownerColor = getLandOwnershipColor('unknown'); // Pending is always 'unknown' border
+                popupText = `<b>${zone.name} (Pending Validation)</b><br>
+                             Reported by: ${zone.reportedBy || 'User'}<br>
+                             Type: ${zone.type || 'Afforestation'}`;
+                radius = 8; // Smaller, fixed radius for pending
+            } else {
+                ownerColor = getLandOwnershipColor(zone.ownerType);
+                popupText = `<b>${zone.name}</b><br>
+                             Coverage: ${zone.coverage}%<br>
+                             Trees: ${zone.trees}<br>
+                             Land: <span style="color:${ownerColor}; font-weight:bold;">${zone.ownerType.toUpperCase()}</span>`;
+                radius = zone.coverage / 5; // Size based on coverage
+            }
+            
+            L.circleMarker([zone.lat, zone.lng], {
+                radius: radius, 
+                color: ownerColor,
+                weight: 3,
+                fillColor: coverageColor,
+                fillOpacity: 0.7
+            }).addTo(map)
+            .bindPopup(popupText);
+        }
+
+        function getCoverageColor(coverage) { 
+            if (coverage === 0) return '#404040'; // Deforested/Pending
+            return coverage > 75 ? '#4CAF50' : 
+                   coverage > 35 ? '#eab308' : 
+                                   '#F44336';
+        }
+        
+        function getLandOwnershipColor(ownerType) {
+            switch(ownerType) {
+                case 'public': return '#3498db';
+                case 'private': return '#9b59b6';
+                case 'government': return '#f1c40f';
+                default: return '#95a5a6';
+            }
+        }
+
+        // UPDATED: handleMapClick now fills the form
+        function handleMapClick(e) { 
+            if (!currentUser) {
+                navigate('login', 'Please log in to report changes to the map.');
+                return;
+            }
+            
+            var lat = e.latlng.lat.toFixed(5);
+            var lng = e.latlng.lng.toFixed(5);
+            
+            // Update form fields
+            document.getElementById('report-coordinates').value = `${lat}, ${lng}`;
+            document.getElementById('report-location-name').value = `Clicked Location (${lat}, ${lng})`;
+            
+            // Remove old temp marker
+            if (selectedLocationMarker) {
+                map.removeLayer(selectedLocationMarker);
+            }
+            
+            // Add new temp marker
+            selectedLocationMarker = L.marker(e.latlng).addTo(map)
+                .bindPopup("<b>Selected Location</b><br>Fill out the form to submit.").openPopup();
+            
+            // Scroll to the form (on mobile)
+            document.getElementById('report-form').scrollIntoView({ behavior: 'smooth' });
+        }
+        
+        // UPDATED: handleReportSubmit now simulates ML verification
+        function handleReportSubmit(e) { 
+            e.preventDefault();
+            if (!currentUser) return;
+
+            // Get form data
+            var locationName = document.getElementById('report-location-name').value;
+            var coordinates = document.getElementById('report-coordinates').value;
+            var reportType = document.getElementById('report-type').value;
+            var imageFile = document.getElementById('report-image').files[0];
+
+            if (!coordinates || !imageFile) {
+                openModal("Error", "Please select a location on the map and upload a verification image.");
+                return;
+            }
+            
+            // --- ML Verification Simulation ---
+            var submitButton = document.getElementById('report-submit-button');
+            var submitText = document.getElementById('report-submit-text');
+            var submitSpinner = document.getElementById('report-submit-spinner');
+
+            // 1. Set loading state
+            submitText.textContent = 'Verifying with AI...';
+            submitSpinner.style.display = 'block';
+            submitButton.disabled = true;
+
+            // 2. Simulate API call to ML model (1.5 seconds)
+            setTimeout(() => {
+                // Mock 90% success rate
+                var mlVerified = Math.random() > 0.1; 
+
+                // 3. Handle response
+                if (mlVerified) {
+                    var latLngArr = coordinates.split(',').map(Number);
+                    var newZone = {
+                        lat: latLngArr[0],
+                        lng: latLngArr[1],
+                        coverage: reportType === 'afforestation' ? 20 : 0, 
+                        trees: reportType === 'afforestation' ? 1 : 0, 
+                        name: locationName,
+                        ownerType: 'unknown',
+                        status: 'pending', // Pending ADMIN review
+                        type: reportType,
+                        reportedBy: currentUser.name
+                    };
+
+                    addZoneMarker(newZone);
+                    greenzones.push(newZone);
+                    
+                    document.getElementById('report-form').reset();
+                    if (selectedLocationMarker) {
+                        map.removeLayer(selectedLocationMarker);
+                        selectedLocationMarker = null;
+                    }
+                    
+                    openModal("AI Verification Successful", "Your report for '" + locationName + "' has been submitted for final admin review.");
+                
+                } else {
+                    // AI verification failed
+                    openModal("AI Verification Failed", "The uploaded image could not be verified. It may not clearly show " + reportType + ". Please try again with a clearer image.");
+                }
+
+                // 4. Reset button
+                submitText.textContent = 'Submit Report for Validation';
+                submitSpinner.style.display = 'none';
+                submitButton.disabled = false;
+
+            }, 1500); // 1.5 second delay
+        }
+        
+        
+        // --- Dashboard Functions ---
+        
+        function loadDashboard() {
+            var mockData = {
+                totalTrees: 1250,
+                verifiedZones: 45,
+                topCommunities: [
+                    { name: 'Green Warriors', trees: 450 },
+                    { name: 'Eco Champions', trees: 320 },
+                    { name: 'Tree Planters', trees: 280 }
+                ]
+            };
+            
+            document.getElementById('total-trees').textContent = mockData.totalTrees.toLocaleString();
+            document.getElementById('co2-offset').textContent = (mockData.totalTrees * 22).toLocaleString() + ' kg';
+            document.getElementById('verified-zones').textContent = mockData.verifiedZones + '%';
+            
+            renderCharts(mockData);
+            updateSidebar();
+        }
+
+        function renderCharts(data) {
+            var communityNames = data.topCommunities.map(c => c.name);
+            var communityTrees = data.topCommunities.map(c => c.trees);
+            
+            Chart.defaults.color = '#E0E0E0'; 
+            Chart.defaults.font.family = 'Inter';
+
+            // Community Chart (Bar)
+            var ctx1 = document.getElementById('community-chart').getContext('2d');
+            if (communityChart) communityChart.destroy();
+            communityChart = new Chart(ctx1, {
+                type: 'bar',
+                data: {
+                    labels: communityNames,
+                    datasets: [{
+                        label: 'Trees Planted',
+                        data: communityTrees,
+                        backgroundColor: ['#4CAF50', '#059669', '#047857', '#064e3b'] 
+                    }]
+                },
+                options: { 
+                    responsive: true, 
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: { 
+                            beginAtZero: true,
+                            grid: { color: '#333' },
+                            ticks: { color: '#E0E0E0' }
+                        },
+                        x: {
+                            grid: { display: false },
+                            ticks: { color: '#E0E0E0' }
+                        }
+                    },
+                    plugins: {
+                        legend: { labels: { color: '#E0E0E0' } }
+                    }
+                }
+            });
+
+            // Coverage Chart (Doughnut)
+            var verifiedPercentage = data.verifiedZones; 
+            var ctx2 = document.getElementById('coverage-chart').getContext('2d');
+            if (coverageChart) coverageChart.destroy();
+            coverageChart = new Chart(ctx2, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Verified Zones', 'Pending'],
+                    datasets: [{
+                        data: [verifiedPercentage, 100 - verifiedPercentage],
+                        backgroundColor: ['#4CAF50', '#404040'] 
+                    }]
+                },
+                options: { 
+                    responsive: true, 
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom', labels: { color: '#E0E0E0' } },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.label || '';
+                                    if (label) { label += ': '; }
+                                    label += context.parsed.toFixed(1) + '%';
+                                    return label;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        function updateSidebar() { 
+            var userInfoEl = document.getElementById('user-info');
+            if (currentUser) {
+                userInfoEl.innerHTML = `
+                    <p class="font-semibold text-accent-green">${currentUser.name}</p>
+                    <p class="text-sm">Rank: Explorer</p>
+                    <p class="text-sm">Contributions: 42 trees</p>
+                `;
+            } else {
+                 userInfoEl.innerHTML = `<p class="text-text-muted">Not logged in</p>`;
+            }
+
+            var communityInfoEl = document.getElementById('community-info');
+            if (currentUser && currentUser.community) {
+                communityInfoEl.innerHTML = `
+                    <p class="font-semibold text-accent-green">${currentUser.community.name}</p>
+                    <p class="text-sm">Members: 125</p>
+                    <p class="text-sm">Goal: 500 trees</p>
+                `;
+            } else {
+                communityInfoEl.innerHTML = `<p class="text-text-muted">No community joined</p>`;
+            }
+        }
+        
+        // --- Projects Page Functions ---
+        
+        function viewProjects() {
+            navigate('projects');
+        }
+
+        // --- Community Page Functions ---
+        
+        function toggleCreateCommunity() { 
+            var form = document.getElementById('create-community-form');
+            var joinForm = document.getElementById('join-community-form');
+            joinForm.style.display = 'none'; 
+            joinForm.classList.remove('is-visible');
+            
+            form.style.display = form.style.display === 'none' ? 'block' : 'none';
+            if (form.style.display === 'block') {
+                setTimeout(() => form.classList.add('is-visible'), 50);
+            } else {
+                form.classList.remove('is-visible');
+            }
+        }
+
+        function toggleJoinCommunity() { 
+            var form = document.getElementById('join-community-form');
+            var createForm = document.getElementById('create-community-form');
+            createForm.style.display = 'none'; 
+            createForm.classList.remove('is-visible');
+            
+            form.style.display = form.style.display === 'none' ? 'block' : 'none';
+            if (form.style.display === 'block') {
+                setTimeout(() => form.classList.add('is-visible'), 50);
+            } else {
+                form.classList.remove('is-visible');
+            }
+        }
+        
+        function handleCreateCommunity(e) { 
+            e.preventDefault();
+            var communityName = document.getElementById('community-name').value;
+            
+            if (currentUser) {
+                currentUser.community = { name: communityName, id: 99 };
+                localStorage.setItem('user', JSON.stringify(currentUser));
+                loadCommunity();
+                toggleCreateCommunity(); 
+                openModal("Community Created", "Community '" + communityName + "' created! (Simulated)"); 
+            }
+        }
+        
+        function handleJoinCommunity(e) {
+            e.preventDefault();
+            var communityCode = document.getElementById('community-code').value;
+            var mockCommunityName = communityCode.split('-')[0] || 'Joined Community';
+            
+            if (currentUser) {
+                currentUser.community = { name: mockCommunityName, id: 100 };
+                localStorage.setItem('user', JSON.stringify(currentUser));
+                loadCommunity();
+                toggleJoinCommunity(); 
+                openModal("Community Joined", "Successfully joined '" + mockCommunityName + "'! (Simulated)");
+            }
+        }
+        
+        function loadCommunity() { 
+            var communityDetailsEl = document.getElementById('community-details');
+            if (currentUser && currentUser.community) {
+                var community = currentUser.community;
+                communityDetailsEl.innerHTML = `
+                    <h2 class="text-3xl font-classic text-text-light mb-4">${community.name}</h2>
+                    <p class="text-lg text-text-muted mb-6">Working towards a greener city since 2024.</p>
+                    
+                    <h3 class="text-2xl font-classic text-accent-green mb-4">🌳 Leaderboard (Trees Contributed)</h3>
+                    <ul class="space-y-3 max-w-lg mx-auto text-left">
+                        <li class="flex justify-between items-center py-2 border-b border-gray-700">
+                            <span class="font-bold text-xl text-accent-green">#1 Alice</span> 
+                            <span class="text-lg text-accent-green">125 trees</span>
+                        </li>
+                        <li class="flex justify-between items-center py-2 border-b border-gray-700">
+                            <span class="font-semibold text-lg">#2 Bob</span> 
+                            <span class="text-base">98 trees</span>
+                        </li>
+                        <li class="flex justify-between items-center py-2 border-b border-gray-700">
+                            <span class="font-semibold text-lg">#3 Charlie</span> 
+                            <span class="text-base">75 trees</span>
+                        </li>
+                    </ul>
+                    <button onclick="viewProjects()" class="mt-8 bg-accent-green text-white px-6 py-2 rounded-lg font-semibold hover:bg-opacity-80 transition">View Projects</button>
+                `;
+            } else {
+                communityDetailsEl.innerHTML = `
+                    <p class="text-text-muted text-xl">
+                        <span class="text-4xl block mb-4">🌱</span> 
+                        No active community. Create or join one to view member leaderboards and project progress!
+                    </p>
+                `;
+            }
+        }
+
+        // --- NEW: Opportunities Page Functions ---
+
+        function togglePostOpportunityForm() {
+            var form = document.getElementById('post-opportunity-form');
+            form.style.display = form.style.display === 'none' ? 'block' : 'none';
+            if (form.style.display === 'block') {
+                setTimeout(() => form.classList.add('is-visible'), 50);
+            } else {
+                form.classList.remove('is-visible');
+            }
+        }
+
+        function loadOpportunities() {
+            renderOpportunitiesList();
+            initAnimations(); // Re-trigger animations for the newly rendered cards
+        }
+
+        function renderOpportunitiesList() {
+            var listEl = document.getElementById('opportunities-list');
+            listEl.innerHTML = ''; // Clear list
+
+            if (plantingOpportunities.length === 0) {
+                listEl.innerHTML = '<p class="text-text-muted col-span-3 text-center">No planting opportunities currently available. Check back soon!</p>';
+                return;
+            }
+
+            plantingOpportunities.forEach((op, index) => {
+                var landColor = getLandOwnershipColor(op.landType);
+                var landBorder = `border-${op.landType}`; // This won't work directly, must use style
+                
+                var statusColor = 'text-accent-green';
+                var actionButton = '';
+
+                if (op.status === 'Open') {
+                    statusColor = 'text-accent-green';
+                    actionButton = `<button onclick="handleAcceptTask(${op.id})" class="w-full mt-4 bg-blue-600 text-white py-2 rounded-lg font-semibold hover:bg-blue-700 transition">Accept Task</button>`;
+                } else if (op.status === 'In Progress') {
+                    statusColor = 'text-yellow-500';
+                    if (currentUser && op.claimedBy === currentUser.name) {
+                        actionButton = `<button onclick="handleCompleteTask(${op.id})" class="w-full mt-4 bg-accent-green text-white py-2 rounded-lg font-semibold hover:bg-opacity-80 transition">Mark as Completed</button>`;
+                    } else {
+                        actionButton = `<button class="w-full mt-4 bg-gray-600 text-text-muted py-2 rounded-lg font-semibold cursor-not-allowed" disabled>In Progress (by ${op.claimedBy})</button>`;
+                    }
+                } else { // Completed
+                    statusColor = 'text-text-muted';
+                    actionButton = `<button class="w-full mt-4 bg-gray-800 text-text-muted py-2 rounded-lg font-semibold cursor-not-allowed" disabled>Completed (by ${op.claimedBy})</button>`;
+                }
+
+                var cardHtml = `
+                    <div class="bg-secondary-dark p-6 rounded-xl shadow-lg border-l-4 animate-fade-in" style="border-left-color: ${landColor}; transition-delay: ${index * 0.1}s">
+                        <div class="flex justify-between items-center mb-2">
+                            <h3 class="text-xl font-semibold text-text-light">${op.title}</h3>
+                            <span class="text-sm font-medium px-3 py-1 rounded-full ${statusColor} bg-primary-dark">${op.status}</span>
+                        </div>
+                        <p class="text-sm mb-4">
+                            <span class="font-semibold" style="color: ${landColor}">${op.landType.toUpperCase()} LAND</span>
+                            <span class="text-text-muted"> | Posted by: ${op.postedBy}</span>
+                        </p>
+                        <p class="text-text-muted mb-4">${op.location}</p>
+                        
+                        ${actionButton}
+                    </div>
+                `;
+                listEl.innerHTML += cardHtml;
+            });
+        }
+
+        function handlePostOpportunity(e) {
+            e.preventDefault();
+            if (!currentUser) return;
+
+            var newOp = {
+                id: plantingOpportunities.length + 1,
+                title: document.getElementById('opportunity-title').value,
+                location: document.getElementById('opportunity-desc').value,
+                landType: document.getElementById('opportunity-land-type').value,
+                status: 'Open',
+                postedBy: currentUser.name,
+                claimedBy: null
+            };
+
+            plantingOpportunities.unshift(newOp); // Add to beginning of array
+            renderOpportunitiesList();
+            togglePostOpportunityForm();
+            openModal('Success', 'New planting opportunity has been posted!');
+            
+            // Reset form
+            document.getElementById('opportunity-title').value = '';
+            document.getElementById('opportunity-desc').value = '';
+        }
+
+        function handleAcceptTask(opportunityId) {
+            if (!currentUser) return;
+
+            var op = plantingOpportunities.find(o => o.id === opportunityId);
+            if (op && op.status === 'Open') {
+                op.status = 'In Progress';
+                op.claimedBy = currentUser.name;
+                renderOpportunitiesList();
+                openModal('Task Accepted', `You have accepted the task: "${op.title}".`);
+            }
+        }
+
+        function handleCompleteTask(opportunityId) {
+            if (!currentUser) return;
+            
+            var op = plantingOpportunities.find(o => o.id === opportunityId);
+            if (op && op.status === 'In Progress' && op.claimedBy === currentUser.name) {
+                op.status = 'Completed';
+                renderOpportunitiesList();
+                openModal('Task Completed', `You have completed the task: "${op.title}". Well done!`);
+            }
+        }
+
+    </script>
+
+<script>
+// ✅ Verification API Integration
+async function submitVerification() {
+  const data = {
+    name: "Park Restoration",
+    location: "Bengaluru",
+    status: "Pending",
+  };
+
+  const res = await fetch("http://localhost:5000/api/verification", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+
+  const result = await res.json();
+  console.log("✅ Verification Submitted:", result);
+}
+
+async function getVerifications() {
+  const res = await fetch("http://localhost:5000/api/verification");
+  const data = await res.json();
+  console.log("✅ All Verifications:", data);
+}
+</script>
+
+</body>
+</html>
+
